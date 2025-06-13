@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BikerAgent</title>
+  <title>BikerAgent v1</title>
   <style>
     body { margin: 0; display: flex; height: 100vh; font-family: sans-serif; position: relative; }
     /* Sidebar */
@@ -15,26 +15,32 @@
     #emulateBtn { background: #ffc107; color: #000; }
     #toggleLogBtn, #configBtn { background: #555; color: #fff; }
 
-    /* Content area */
+    /* Content layout */
     #content { flex: 1; margin-left: 0; transition: margin-left 0.3s; display: flex; flex-direction: column; }
     #sidebar.open ~ #content { margin-left: 260px; }
     header { height: 50px; background: #333; color: #fff; display: flex; align-items: center; padding: 0 1em; }
     header h1 { flex: 1; text-align: center; margin: 0; }
+    header small { font-size: 0.6em; color: #ccc; vertical-align: super; }
     #toggleSidebar { background: none; border: none; color: #fff; font-size: 1.5em; cursor: pointer; }
 
     /* Main view */
     #main { padding: 1em; flex: 1; display: flex; flex-direction: column; overflow: auto; }
     #angle { font-size: 3em; text-align: center; margin: 0.5em 0; }
-    #speedometer { text-align: center; margin: 1em 0; }
+    /* Angle bar */
+    #angleBarContainer { position: relative; width: 100%; background: #eee; height: 20px; border-radius: 5px; overflow: hidden; margin: 0.5em 0; }
+    #angleBarContainer::before { content: ''; position: absolute; top: 0; bottom: 0; width: 2px; background: #888; left: 50%; }
+    #angleBar { position: absolute; top: 0; bottom:0; left:50%; width:0; background-color:#4caf50; transition: left 0.1s, width 0.1s, background-color 0.1s; }
+    /* Speed bar */
+    #speedometer { text-align: center; margin: 0.5em 0; }
     #speedValue { font-size: 2em; }
-    #speedBarContainer { width: 100%; background: #eee; height: 10px; border-radius: 5px; overflow: hidden; }
-    #speedBar { height: 100%; width: 0; background: #2196f3; }
+    #speedBarContainer { position: relative; width: 100%; background: #eee; height: 10px; border-radius: 5px; overflow: hidden; margin: 0.5em 0; }
+    #speedBar { position: absolute; top: 0; bottom:0; left: 0; width:0; background:#2196f3; transition: width 0.1s; }
     #bikeIcon svg { width: 120px; margin: 10px auto; transition: transform 0.1s; transform-origin: center; }
-    #barContainer { width: 100%; background: #eee; height: 20px; margin: 10px 0; border-radius: 10px; position: relative; }
-    #bar { position: absolute; top: 0; height: 100%; width: 0; }
+
+    /* Charts */
     .chart-container { position: relative; flex: 1; margin-top: 1em; }
     .chart-container canvas { width: 100%; height: 100%; }
-    #exportPdfBtn { position: absolute; top: 10px; right: 10px; background: #007bff; color: #fff; border: none; padding: 0.3em 0.6em; border-radius: 4px; cursor: pointer; }
+    .export-btn { position: absolute; top: 8px; right: 8px; background: #007bff; color: #fff; border: none; padding: 0.2em 0.5em; border-radius: 4px; cursor: pointer; font-size: 0.8em; z-index: 10; }
 
     /* Log panel */
     #log { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: #0f0; padding: 5px; font-size: 0.8em; max-height: 30%; overflow-y: auto; display: none; }
@@ -47,10 +53,6 @@
     #configModal button { margin-top: 0.5em; }
     #modalOverlay { display: none; position: fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.4); z-index: 200; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
   <div id="sidebar">
@@ -63,19 +65,24 @@
   <div id="content">
     <header>
       <button id="toggleSidebar">☰</button>
-      <h1>BikerAgent</h1>
+      <h1>BikerAgent <small>v1</small></h1>
     </header>
     <div id="main">
+      <div id="angleBarContainer"><div id="angleBar"></div></div>
       <div id="angle">--°</div>
       <div id="speedometer">
         <div id="speedValue">-- km/h</div>
         <div id="speedBarContainer"><div id="speedBar"></div></div>
       </div>
       <div id="bikeIcon"><svg viewBox="0 0 100 200"></svg></div>
-      <div id="barContainer"><div id="bar"></div></div>
-      <div class="chart-container"><canvas id="angleChart"></canvas></div>
-      <div class="chart-container" style="margin-top:0.5em;"><canvas id="speedChart"></canvas></div>
-      <button id="exportPdfBtn">PDF</button>
+      <div class="chart-container">
+        <button class="export-btn" data-chart="angleChart">PDF</button>
+        <canvas id="angleChart"></canvas>
+      </div>
+      <div class="chart-container" style="margin-top:0.5em;">
+        <button class="export-btn" data-chart="speedChart">PDF</button>
+        <canvas id="speedChart"></canvas>
+      </div>
     </div>
   </div>
   <div id="log"></div>
@@ -87,8 +94,12 @@
     <button id="configOk">OK</button>
     <button id="configCancel">Cancel</button>
   </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
-    // Elements
     const sidebar = document.getElementById('sidebar');
     const toggleSidebar = document.getElementById('toggleSidebar');
     const startBtn = document.getElementById('startBtn');
@@ -96,191 +107,141 @@
     const emulateBtn = document.getElementById('emulateBtn');
     const toggleLogBtn = document.getElementById('toggleLogBtn');
     const configBtn = document.getElementById('configBtn');
-    const exportBtn = document.getElementById('exportPdfBtn');
-    const angleDisplay = document.getElementById('angle');
-    const speedValue = document.getElementById('speedValue');
-    const speedBar = document.getElementById('speedBar');
-    const bikeIconSvg = document.querySelector('#bikeIcon svg');
-    const bar = document.getElementById('bar');
     const logEl = document.getElementById('log');
-    const angleCtx = document.getElementById('angleChart').getContext('2d');
-    const speedCtx = document.getElementById('speedChart').getContext('2d');
     const modal = document.getElementById('configModal');
     const overlay = document.getElementById('modalOverlay');
     const slider = document.getElementById('intervalSlider');
     const intervalValue = document.getElementById('intervalValue');
     const configOk = document.getElementById('configOk');
     const configCancel = document.getElementById('configCancel');
+    const exportButtons = document.querySelectorAll('.export-btn');
 
-    // State
-    let listening=false, emulating=false, emuInterval=null, sampleTimer=null;
-    let geoWatchId=null, prevGeo=null;
+    let listening=false, emulating=false, sampleInterval=0, sampleTimer=null, geoWatchId=null;
+    let latestOrient=null, latestSpeed=null;
     let angleHistory=[], speedHistory=[];
-    let sampleInterval=0; // seconds
     const emRanges=[];
 
-    // Log helper
     function log(msg) {
       const t = new Date().toLocaleTimeString();
       logEl.innerHTML += `<div>[${t}] ${msg}</div>`;
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    // Charts
-    const emuPlugin = { id:'emuBg', beforeDraw(chart) { const x=chart.scales.x, a=chart.chartArea, c=chart.ctx; emRanges.forEach(r=>{ const x1=x.getPixelForValue(r.start), x2=x.getPixelForValue(r.end||Date.now()); c.save(); c.fillStyle='rgba(173,216,230,0.3)'; c.fillRect(x1,a.top,x2-x1,a.bottom-a.top); c.restore(); }); } };
-    const angleChart = new Chart(angleCtx,{type:'line',data:{datasets:[{label:'Lean',data:[],fill:false,borderColor:'green',tension:0.1,segment:{borderColor:c=>c.p1.parsed.y<0?'orange':'green'}}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{type:'time'},y:{min:-90,max:90}},plugins:{legend:{display:false}}},plugins:[emuPlugin]});
-    const speedChart = new Chart(speedCtx,{type:'line',data:{datasets:[{label:'Speed',data:[],fill:false,borderColor:'blue',tension:0.1}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{type:'time'},y:{min:0,max:200}},plugins:{legend:{display:false}}}});
+    // Charts init
+    const emuPlugin = { id:'emuBg', beforeDraw(chart) {
+      const x = chart.scales.x;
+      const area = chart.chartArea;
+      const ctx = chart.ctx;
+      emRanges.forEach(r => {
+        const startX = x.getPixelForValue(r.start);
+        const endX = x.getPixelForValue(r.end || Date.now());
+        ctx.save(); ctx.fillStyle = 'rgba(173,216,230,0.3)';
+        ctx.fillRect(startX, area.top, endX - startX, area.bottom - area.top);
+        ctx.restore();
+      });
+    }};
+    const angleCtx = document.getElementById('angleChart').getContext('2d');
+    const speedCtx = document.getElementById('speedChart').getContext('2d');
+    const angleChart = new Chart(angleCtx, { type:'line', data:{datasets:[{label:'Lean',data:[],fill:false,borderColor:'green',tension:0.1,segment:{borderColor:ctx=>ctx.p1.parsed.y<0?'orange':'green'}}]}, options:{responsive:true,maintainAspectRatio:false,scales:{x:{type:'time'},y:{min:-90,max:90}},plugins:{legend:{display:false}}}, plugins:[emuPlugin] });
+    const speedChart = new Chart(speedCtx, { type:'line', data:{datasets:[{label:'Speed',data:[],fill:false,borderColor:'blue',tension:0.1}]}, options:{responsive:true,maintainAspectRatio:false,scales:{x:{type:'time'},y:{min:0,max:200}},plugins:{legend:{display:false}}} });
 
-    // Update functions
-    function updateAngleHistory(val) {
-      const now=Date.now(); angleHistory.push({x:now,y:val}); angleHistory=angleHistory.filter(pt=>pt.x>=now-600000);
-      angleChart.data.datasets[0].data=angleHistory; angleChart.options.scales.x.min=now-600000; angleChart.options.scales.x.max=now; angleChart.update('none');
-    }
-    function updateSpeedHistory(val) {
-      const now=Date.now(); speedHistory.push({x:now,y:val}); speedHistory=speedHistory.filter(pt=>pt.x>=now-600000);
-      speedChart.data.datasets[0].data=speedHistory; speedChart.options.scales.x.min=now-600000; speedChart.options.scales.x.max=now; speedChart.update('none');
-    }
-
-    // Handlers
-    let latestOrient=null, latestSpeed=null;
-    function handleOrientation(e) {
-      if (typeof e.gamma === 'number') {
-        latestOrient = e.gamma;
-        if (sampleInterval === 0) applySample();
-      }
-    }
-    function handleDeviceOrientation(e) {
-      handleOrientation(e);
-    }
-
-    function handleSpeed(pos) {
-      const sp = pos.coords.speed;
-      const km = (typeof sp === 'number' && !isNaN(sp)) ? Math.round(sp * 3.6) : 0;
-      latestSpeed = km;
-      if (sampleInterval === 0) applySample();
-    }
+    function updateAngleHistory(val) { const now=Date.now(); angleHistory.push({x:now,y:val}); angleHistory=angleHistory.filter(p=>p.x>=now-600000); angleChart.data.datasets[0].data=angleHistory; angleChart.options.scales.x.min=now-600000; angleChart.options.scales.x.max=now; angleChart.update('none'); }
+    function updateSpeedHistory(val) { const now=Date.now(); speedHistory.push({x:now,y:val}); speedHistory=speedHistory.filter(p=>p.x>=now-600000); speedChart.data.datasets[0].data=speedHistory; speedChart.options.scales.x.min=now-600000; speedChart.options.scales.x.max=now; speedChart.update('none'); }
 
     function applySample() {
-      if (latestOrient != null) {
-        angleDisplay.textContent = `${latestOrient.toFixed(1)}°`;
-        bikeIconSvg.style.transform = `skewY(${latestOrient}deg)`;
-        const p = Math.min(Math.abs(latestOrient) / 90 * 50, 50);
-        bar.style.left = latestOrient >= 0 ? '50%' : `${50 - p}%`;
-        bar.style.width = `${p}%`;
-        bar.style.backgroundColor = latestOrient < 0 ? 'orange' : '#4caf50';
-        log(`Orientation: ${latestOrient.toFixed(1)}`);
-        updateAngleHistory(latestOrient);
+      if(latestOrient!=null) {
+        const angle = latestOrient;
+        log(`Orientation: ${angle.toFixed(1)}`);
+        updateAngleHistory(angle);
+        document.getElementById('angle').textContent = `${angle.toFixed(1)}°`;
+        const pct = Math.min(Math.abs(angle)/90*50,50);
+        const barEl = document.getElementById('angleBar');
+        barEl.style.left = angle>=0?'50%':`${50-pct}%`;
+        barEl.style.width = `${pct}%`;
+        barEl.style.backgroundColor = angle<0?'orange':'#4caf50';
+        document.querySelector('#bikeIcon svg').style.transform = `skewY(${angle}deg)`;
       }
-      if (latestSpeed != null) {
-        speedValue.textContent = `${latestSpeed} km/h`;
-        speedBar.style.width = `${Math.min(latestSpeed / 200 * 100, 100)}%`;
-        log(`Speed: ${latestSpeed} km/h`);
-        updateSpeedHistory(latestSpeed);
+      if(latestSpeed!=null) {
+        const spd = latestSpeed;
+        log(`Speed: ${spd} km/h`);
+        updateSpeedHistory(spd);
+        document.getElementById('speedValue').textContent = `${spd} km/h`;
+        document.getElementById('speedBar').style.width = `${Math.min(spd/200*100,100)}%`;
       }
     }
 
-    // Sample timer
-    function resetSampleTimer() {
-      if (sampleTimer) clearInterval(sampleTimer);
-      if (sampleInterval > 0) sampleTimer = setInterval(applySample, sampleInterval * 1000);
-    }
+    function resetSampleTimer(){ clearInterval(sampleTimer); if(sampleInterval>0) sampleTimer=setInterval(applySample, sampleInterval*1000); }
 
-    // Config modal
-    configBtn.addEventListener('click', () => {
-      slider.value = sampleInterval;
-      intervalValue.textContent = sampleInterval.toFixed(1);
-      overlay.style.display = 'block';
-      modal.style.display = 'block';
-    });
-    slider.oninput = () => { intervalValue.textContent = slider.value; };
-    configOk.onclick = () => {
-      sampleInterval = parseFloat(slider.value);
-      resetSampleTimer();
-      overlay.style.display = 'none';
-      modal.style.display = 'none';
-    }; 
-    configCancel.onclick = () => { overlay.style.display = 'none'; modal.style.display = 'none'; };
-
-    // Detection controls
     function startDetection() {
-      if (listening) return;
-      if (emulating) stopEmulation();
+      if(listening) return;
+      if(emulating) stopEmulation();
       log('Starting detection');
-      window.removeEventListener('deviceorientation', handleDeviceOrientation);
-      const enable = () => {
-        window.addEventListener('deviceorientation', handleDeviceOrientation);
-        listening = true;
-        sidebar.classList.remove('open');
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-        resetSampleTimer();
-      };
-      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission().then(r => { if (r === 'granted') enable(); });
-      } else enable();
-      if (window.isSecureContext && navigator.geolocation) {
-        geoWatchId = navigator.geolocation.watchPosition(handleSpeed, err => log(`GPS error(${err.code}):${err.message}`), { enableHighAccuracy: true, maximumAge: 1000 });
-      } else {
-        log('Insecure context or no geolocation');
-      }
-    }
-    function stopDetection() {
-      if (!listening) return;
-      window.removeEventListener('deviceorientation', handleDeviceOrientation);
-      listening = false;
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      if (geoWatchId != null) navigator.geolocation.clearWatch(geoWatchId);
-      if (sampleTimer) clearInterval(sampleTimer);
+      window.removeEventListener('deviceorientation', handleDevOrient);
+      const enable = () => { window.addEventListener('deviceorientation', handleDevOrient); listening=true; sidebar.classList.remove('open'); startBtn.disabled=true; stopBtn.disabled=false; resetSampleTimer(); };
+      if(typeof DeviceOrientationEvent.requestPermission==='function') DeviceOrientationEvent.requestPermission().then(r=>{ if(r==='granted') enable(); }); else enable();
+      if(window.isSecureContext && navigator.geolocation) geoWatchId = navigator.geolocation.watchPosition(handleSpeed, err=>log(`GPS error(${err.code}): ${err.message}`), {enableHighAccuracy:true, maximumAge:1000});
+      else log('Insecure context or no GPS');
     }
 
-    // Emulation
-    function startEmulation() {
-      if (emulating) return;
-      if (listening) stopDetection();
-      log('Starting emulation');
-      emulating = true;
-      emulateBtn.textContent = 'Stop Emulation';
-      sidebar.classList.remove('open');
-      emRanges.push({ start: Date.now(), end: null });
-      resetSampleTimer();
-      sampleTimer = setInterval(() => {
-        latestOrient = Math.random() * 120 - 60;
-        latestSpeed = Math.round(Math.random() * 120);
-        applySample();
-      }, sampleInterval * 1000 || 1000);
+    function stopDetection() {
+      if(!listening) return;
+      window.removeEventListener('deviceorientation', handleDevOrient);
+      listening=false;
+      startBtn.disabled=false;
+      stopBtn.disabled=true;
+      if(geoWatchId) navigator.geolocation.clearWatch(geoWatchId);
+      clearInterval(sampleTimer);
     }
+
+    function startEmulation() {
+      if(emulating) return;
+      if(listening) stopDetection();
+      log('Starting emulation');
+      emulating=true;
+      emulateBtn.textContent='Stop Emulation';
+      sidebar.classList.remove('open');
+      emRanges.push({start:Date.now(),end:null});
+      resetSampleTimer();
+      sampleTimer=setInterval(()=>{ latestOrient = Math.random()*120-60; latestSpeed=Math.round(Math.random()*120); applySample(); }, sampleInterval*1000||1000);
+    }
+
     function stopEmulation() {
-      if (!emulating) return;
+      if(!emulating) return;
       clearInterval(sampleTimer);
       log('Stopping emulation');
-      emulating = false;
-      emulateBtn.textContent = 'Emulation Mode';
-      emRanges[emRanges.length - 1].end = Date.now();
+      emulating=false;
+      emulateBtn.textContent='Emulation Mode';
+      emRanges[emRanges.length-1].end = Date.now();
     }
 
-    function exportPDF() {
-      html2canvas(document.querySelector('#angleChart')).then(canvas => {
-        const img = canvas.toDataURL('image/png');
-        const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF({ orientation: 'landscape' });
-        const p = pdf.getImageProperties(img);
-        const w = pdf.internal.pageSize.getWidth() - 20;
-        const h = (p.height * w) / p.width;
-        const now = new Date();
-        const fn = `BikerAgent_LeanHistory_${now.getFullYear()}${String(now.getDate()).padStart(2,'0')}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}.pdf`;
-        pdf.addImage(img, 'PNG', 10, 10, w, h);
-        pdf.save(fn);
-      });
-    }
+    function handleDevOrient(e) { if(typeof e.gamma==='number') { latestOrient=e.gamma; if(sampleInterval===0) applySample(); }}
+    function handleSpeed(pos) { const sp=pos.coords.speed; latestSpeed=(typeof sp==='number'&&!isNaN(sp))?Math.round(sp*3.6):0; if(sampleInterval===0) applySample(); }
 
-    // Bind controls
-    toggleSidebar.addEventListener('click', () => sidebar.classList.toggle('open'));
+    toggleSidebar.addEventListener('click', ()=>sidebar.classList.toggle('open'));
     startBtn.addEventListener('click', startDetection);
     stopBtn.addEventListener('click', stopDetection);
-    emulateBtn.addEventListener('click', () => emulating ? stopEmulation() : startEmulation());
-    exportBtn.addEventListener('click', exportPDF);
-    toggleLogBtn.addEventListener('click', () => { const v = logEl.classList.toggle('show'); toggleLogBtn.textContent = v ? 'Hide Logs' : 'Show Logs'; });
+    emulateBtn.addEventListener('click', ()=> emulating? stopEmulation() : startEmulation());
+    toggleLogBtn.addEventListener('click', ()=>{ const v=logEl.classList.toggle('show'); toggleLogBtn.textContent=v?'Hide Logs':'Show Logs'; });
+    configBtn.addEventListener('click', ()=>{ slider.value=sampleInterval; intervalValue.textContent=sampleInterval.toFixed(1); overlay.style.display='block'; modal.style.display='block'; });
+    slider.oninput = ()=> intervalValue.textContent = slider.value;
+    configOk.addEventListener('click', ()=>{ sampleInterval=parseFloat(slider.value); resetSampleTimer(); overlay.style.display='none'; modal.style.display='none'; });
+    configCancel.addEventListener('click', ()=>{ overlay.style.display='none'; modal.style.display='none'; });
+    exportButtons.forEach(btn=>btn.addEventListener('click', ()=>{
+      const chartId=btn.getAttribute('data-chart');
+      const canvas=document.getElementById(chartId);
+      html2canvas(canvas).then(c=>{
+        const img=c.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const pdf=new jsPDF({orientation:'landscape'});
+        const p=pdf.getImageProperties(img);
+        const w=pdf.internal.pageSize.getWidth()-20;
+        const h=(p.height*w)/p.width;
+        const now=new Date();
+        const fn=`BikerAgent_${chartId}_${now.getFullYear()}${String(now.getDate()).padStart(2,'0')}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}.pdf`;
+        pdf.addImage(img,'PNG',10,10,w,h);
+        pdf.save(fn);
+      });
+    }));
   </script>
 </body>
 </html>
