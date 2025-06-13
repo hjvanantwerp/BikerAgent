@@ -143,55 +143,144 @@
 
     // Handlers
     let latestOrient=null, latestSpeed=null;
-    function handleOrientation(a) { latestOrient=a; if(sampleInterval===0){ applySample(); } }
-    function handleSpeed(pos) { const sp=pos.coords.speed; let km= (typeof sp==='number'&&!isNaN(sp))?Math.round(sp*3.6):0; latestSpeed=km; if(sampleInterval===0){ applySample(); } }
-    function applySample() {
-      if(latestOrient!=null){ angleDisplay.textContent=`${latestOrient.toFixed(1)}°`; bikeIconSvg.style.transform=`skewY(${latestOrient}deg)`; const p=Math.min(Math.abs(latestOrient)/90*50,50); bar.style.left=latestOrient>=0?'50%':`${50-p}%`; bar.style.width=`${p}%`; bar.style.backgroundColor=latestOrient<0?'orange':'#4caf50'; log(`Orientation: ${latestOrient.toFixed(1)}`); updateAngleHistory(latestOrient); }
-      if(latestSpeed!=null){ speedValue.textContent=`${latestSpeed} km/h`; speedBar.style.width=`${Math.min(latestSpeed/200*100,100)}%`; log(`Speed: ${latestSpeed} km/h`); updateSpeedHistory(latestSpeed); }
+    function handleOrientation(e) {
+      if (typeof e.gamma === 'number') {
+        latestOrient = e.gamma;
+        if (sampleInterval === 0) applySample();
+      }
+    }
+    function handleDeviceOrientation(e) {
+      handleOrientation(e);
     }
 
-    // Sample timer control
+    function handleSpeed(pos) {
+      const sp = pos.coords.speed;
+      const km = (typeof sp === 'number' && !isNaN(sp)) ? Math.round(sp * 3.6) : 0;
+      latestSpeed = km;
+      if (sampleInterval === 0) applySample();
+    }
+
+    function applySample() {
+      if (latestOrient != null) {
+        angleDisplay.textContent = `${latestOrient.toFixed(1)}°`;
+        bikeIconSvg.style.transform = `skewY(${latestOrient}deg)`;
+        const p = Math.min(Math.abs(latestOrient) / 90 * 50, 50);
+        bar.style.left = latestOrient >= 0 ? '50%' : `${50 - p}%`;
+        bar.style.width = `${p}%`;
+        bar.style.backgroundColor = latestOrient < 0 ? 'orange' : '#4caf50';
+        log(`Orientation: ${latestOrient.toFixed(1)}`);
+        updateAngleHistory(latestOrient);
+      }
+      if (latestSpeed != null) {
+        speedValue.textContent = `${latestSpeed} km/h`;
+        speedBar.style.width = `${Math.min(latestSpeed / 200 * 100, 100)}%`;
+        log(`Speed: ${latestSpeed} km/h`);
+        updateSpeedHistory(latestSpeed);
+      }
+    }
+
+    // Sample timer
     function resetSampleTimer() {
-      if(sampleTimer) clearInterval(sampleTimer);
-      if(sampleInterval>0) sampleTimer = setInterval(applySample, sampleInterval*1000);
+      if (sampleTimer) clearInterval(sampleTimer);
+      if (sampleInterval > 0) sampleTimer = setInterval(applySample, sampleInterval * 1000);
     }
 
     // Config modal
-    configBtn.addEventListener('click', ()=>{
-      slider.value=sampleInterval; intervalValue.textContent=sampleInterval.toFixed(1);
-      overlay.style.display='block'; modal.style.display='block';
+    configBtn.addEventListener('click', () => {
+      slider.value = sampleInterval;
+      intervalValue.textContent = sampleInterval.toFixed(1);
+      overlay.style.display = 'block';
+      modal.style.display = 'block';
     });
-    slider.oninput = ()=>{ intervalValue.textContent=slider.value; };
-    configOk.onclick = ()=>{
-      sampleInterval=parseFloat(slider.value); resetSampleTimer(); overlay.style.display='none'; modal.style.display='none';
-    };
-    configCancel.onclick = ()=>{ overlay.style.display='none'; modal.style.display='none'; };
+    slider.oninput = () => { intervalValue.textContent = slider.value; };
+    configOk.onclick = () => {
+      sampleInterval = parseFloat(slider.value);
+      resetSampleTimer();
+      overlay.style.display = 'none';
+      modal.style.display = 'none';
+    }; 
+    configCancel.onclick = () => { overlay.style.display = 'none'; modal.style.display = 'none'; };
 
-    // Detection
+    // Detection controls
     function startDetection() {
-      if(listening) return; if(emulating) stopEmulation(); log('Starting detection');
-      window.removeEventListener('deviceorientation', handleDevOrient); window.removeEventListener('devicemotion', handleMotion);
-      const enable = ()=>{ window.addEventListener('deviceorientation', handleDevOrient); window.addEventListener('devicemotion', handleMotion); listening=true; sidebar.classList.remove('open'); startBtn.disabled=true; stopBtn.disabled=false; resetSampleTimer(); };
-      if(typeof DeviceOrientationEvent.requestPermission==='function') DeviceOrientationEvent.requestPermission().then(r=>{ if(r==='granted') enable(); }); else enable();
-      if(window.isSecureContext) geoWatchId=navigator.geolocation.watchPosition(handleSpeed,err=>log(`GPS error(${err.code}):${err.message}`),{enableHighAccuracy:true,maximumAge:1000}); else log('Insecure: GPS disabled');
+      if (listening) return;
+      if (emulating) stopEmulation();
+      log('Starting detection');
+      window.removeEventListener('deviceorientation', handleDeviceOrientation);
+      const enable = () => {
+        window.addEventListener('deviceorientation', handleDeviceOrientation);
+        listening = true;
+        sidebar.classList.remove('open');
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        resetSampleTimer();
+      };
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(r => { if (r === 'granted') enable(); });
+      } else enable();
+      if (window.isSecureContext && navigator.geolocation) {
+        geoWatchId = navigator.geolocation.watchPosition(handleSpeed, err => log(`GPS error(${err.code}):${err.message}`), { enableHighAccuracy: true, maximumAge: 1000 });
+      } else {
+        log('Insecure context or no geolocation');
+      }
     }
-    function stopDetection(){ if(!listening) return; window.removeEventListener('deviceorientation', handleDevOrient); window.removeEventListener('devicemotion', handleMotion); listening=false; startBtn.disabled=false; stopBtn.disabled=true; if(geoWatchId!=null) navigator.geolocation.clearWatch(geoWatchId); if(sampleTimer) clearInterval(sampleTimer); }
+    function stopDetection() {
+      if (!listening) return;
+      window.removeEventListener('deviceorientation', handleDeviceOrientation);
+      listening = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      if (geoWatchId != null) navigator.geolocation.clearWatch(geoWatchId);
+      if (sampleTimer) clearInterval(sampleTimer);
+    }
 
     // Emulation
-    function startEmulation(){ if(emulating) return; if(listening) stopDetection(); log('Starting emulation'); emulating=true; emulateBtn.textContent='Stop Emulation'; sidebar.classList.remove('open'); emRanges.push({start:Date.now(),end:null}); resetSampleTimer(); sampleTimer = setInterval(()=>{ const a=Math.random()*120-60; latestOrient=a; latestSpeed=Math.round(Math.random()*120); applySample(); }, sampleInterval*1000 || 1000); }
-    function stopEmulation(){ if(!emulating) return; clearInterval(sampleTimer); log('Stopping emulation'); emulating=false; emulateBtn.textContent='Emulation Mode'; emRanges[emRanges.length-1].end=Date.now(); }
+    function startEmulation() {
+      if (emulating) return;
+      if (listening) stopDetection();
+      log('Starting emulation');
+      emulating = true;
+      emulateBtn.textContent = 'Stop Emulation';
+      sidebar.classList.remove('open');
+      emRanges.push({ start: Date.now(), end: null });
+      resetSampleTimer();
+      sampleTimer = setInterval(() => {
+        latestOrient = Math.random() * 120 - 60;
+        latestSpeed = Math.round(Math.random() * 120);
+        applySample();
+      }, sampleInterval * 1000 || 1000);
+    }
+    function stopEmulation() {
+      if (!emulating) return;
+      clearInterval(sampleTimer);
+      log('Stopping emulation');
+      emulating = false;
+      emulateBtn.textContent = 'Emulation Mode';
+      emRanges[emRanges.length - 1].end = Date.now();
+    }
 
-    function exportPDF(){ html2canvas(document.querySelector('#angleChart')).then(canvas=>{ const img=canvas.toDataURL('image/png'); const{jsPDF}=window.jspdf; const pdf=new jsPDF({orientation:'landscape'}); const p=pdf.getImageProperties(img); const w=pdf.internal.pageSize.getWidth()-20; const h=(p.height*w)/p.width; const d=new Date(); const fn=`BikerAgent_LeanHistory_${d.getFullYear()}${String(d.getDate()).padStart(2,'0')}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}${String(d.getSeconds()).padStart(2,'0')}.pdf`; pdf.addImage(img,'PNG',10,10,w,h); pdf.save(fn); }); }
+    function exportPDF() {
+      html2canvas(document.querySelector('#angleChart')).then(canvas => {
+        const img = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ orientation: 'landscape' });
+        const p = pdf.getImageProperties(img);
+        const w = pdf.internal.pageSize.getWidth() - 20;
+        const h = (p.height * w) / p.width;
+        const now = new Date();
+        const fn = `BikerAgent_LeanHistory_${now.getFullYear()}${String(now.getDate()).padStart(2,'0')}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}.pdf`;
+        pdf.addImage(img, 'PNG', 10, 10, w, h);
+        pdf.save(fn);
+      });
+    }
 
-    // Bind
-    toggleSidebar.addEventListener('click', ()=>sidebar.classList.toggle('open'));
+    // Bind controls
+    toggleSidebar.addEventListener('click', () => sidebar.classList.toggle('open'));
     startBtn.addEventListener('click', startDetection);
     stopBtn.addEventListener('click', stopDetection);
-    emulateBtn.addEventListener('click', ()=>emulating?stopEmulation():startEmulation());
+    emulateBtn.addEventListener('click', () => emulating ? stopEmulation() : startEmulation());
     exportBtn.addEventListener('click', exportPDF);
-    toggleLogBtn.addEventListener('click', ()=>{ const v=logEl.classList.toggle('show'); toggleLogBtn.textContent=v?'Hide Logs':'Show Logs'; });
-    const handleDevOrient = e => handleOrientation(e.gamma);
-    const handleMotion = e => { if(e.rotationRate&&typeof e.rotationRate.gamma==='number') handleOrientation(e.rotationRate.gamma); };
+    toggleLogBtn.addEventListener('click', () => { const v = logEl.classList.toggle('show'); toggleLogBtn.textContent = v ? 'Hide Logs' : 'Show Logs'; });
   </script>
 </body>
 </html>
