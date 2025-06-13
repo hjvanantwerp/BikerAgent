@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BikerAgent</title>
+  <style>
+    body { margin: 0; display: flex; height: 100vh; font-family: sans-serif; position: relative; }
+    /* Sidebar */
+    #sidebar { position: fixed; top: 0; left: 0; width: 0; height: 100%; background: #333; color: #fff; overflow: hidden; transition: width 0.3s; display: flex; flex-direction: column; align-items: center; padding-top: 60px; }
+    #sidebar.open { width: 240px; }
+    #sidebar button { width: 80%; margin: 0.5em 0; padding: 0.5em; font-size: 1em; border: none; border-radius: 4px; cursor: pointer; }
+    #startBtn { background: #4caf50; color: #fff; }
+    #stopBtn { background: #f44336; color: #fff; }
+    #emulateBtn { background: #ffc107; color: #000; }
+    #toggleLogBtn { background: #555; color: #fff; }
+
+    /* Content */
+    #content { flex: 1; margin-left: 0; transition: margin-left 0.3s; display: flex; flex-direction: column; }
+    #sidebar.open ~ #content { margin-left: 240px; }
+    header { height: 50px; background: #333; color: #fff; display: flex; align-items: center; padding: 0 1em; }
+    header h1 { flex: 1; text-align: center; margin: 0; }
+    #toggleSidebar { background: none; border: none; color: #fff; font-size: 1.5em; cursor: pointer; }
+
+    /* Main */
+    #main { padding: 1em; flex: 1; display: flex; flex-direction: column; overflow: auto; }
+    #angle { font-size: 3em; text-align: center; margin: 0.5em 0; }
+    #speedometer { text-align: center; margin: 1em 0; }
+    #speedValue { font-size: 2em; }
+    #speedBarContainer { width: 100%; background: #eee; height: 10px; border-radius: 5px; overflow: hidden; }
+    #speedBar { height: 100%; width: 0; background: #2196f3; }
+    #bikeIcon svg { width: 120px; margin: 10px auto; transition: transform 0.1s; transform-origin: center; }
+    #barContainer { width: 100%; background: #eee; height: 20px; margin: 10px 0; border-radius: 10px; position: relative; }
+    #bar { position: absolute; top: 0; height: 100%; width: 0; }
+    .chart-container { position: relative; flex: 1; }
+    .chart-container canvas { width: 100%; height: 100%; }
+    #exportPdfBtn { position: absolute; top: 10px; right: 10px; background: #007bff; color: #fff; border: none; padding: 0.3em 0.6em; border-radius: 4px; cursor: pointer; }
+
+    /* Log panel */
+    #log { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: #0f0; padding: 5px; font-size: 0.8em; max-height: 30%; overflow-y: auto; display: none; }
+    #log.show { display: block; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div id="sidebar">
+    <button id="startBtn">Start Detection</button>
+    <button id="stopBtn" disabled>Stop Detection</button>
+    <button id="emulateBtn">Emulation Mode</button>
+    <button id="toggleLogBtn">Show Logs</button>
+  </div>
+  <div id="content">
+    <header>
+      <button id="toggleSidebar">☰</button>
+      <h1>BikerAgent</h1>
+    </header>
+    <div id="main">
+      <div id="angle">--°</div>
+      <div id="speedometer">
+        <div id="speedValue">-- km/h</div>
+        <div id="speedBarContainer"><div id="speedBar"></div></div>
+      </div>
+      <div id="bikeIcon">
+        <svg viewBox="0 0 100 200" xmlns="http://www.w3.org/2000/svg">
+          <!-- Top-view motorcycle icon -->
+        </svg>
+      </div>
+      <div id="barContainer"><div id="bar"></div></div>
+      <div class="chart-container">
+        <button id="exportPdfBtn">PDF</button>
+        <canvas id="historyChart"></canvas>
+      </div>
+    </div>
+  </div>
+  <div id="log"></div>
+  <script>
+    // Get elements
+    const sidebar = document.getElementById('sidebar');
+    const toggleSidebar = document.getElementById('toggleSidebar');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const emulateBtn = document.getElementById('emulateBtn');
+    const toggleLogBtn = document.getElementById('toggleLogBtn');
+    const exportBtn = document.getElementById('exportPdfBtn');
+    const angleDisplay = document.getElementById('angle');
+    const speedValue = document.getElementById('speedValue');
+    const speedBar = document.getElementById('speedBar');
+    const bikeIconSvg = document.querySelector('#bikeIcon svg');
+    const bar = document.getElementById('bar');
+    const logEl = document.getElementById('log');
+    const ctx = document.getElementById('historyChart').getContext('2d');
+
+    // State
+    let listening=false, emulating=false, emuInterval=null, geoWatchId=null;
+    let prevGeo=null, historyData=[], emRanges=[];
+
+    // Log function
+    function log(msg) {
+      const time = new Date().toLocaleTimeString();
+      logEl.innerHTML += `<div>[${time}] ${msg}</div>`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // Chart plugin for emulation overlay
+    const emuPlugin = {
+      id: 'emuBg',
+      beforeDraw(c) {
+        const x = c.scales.x;
+        const area = c.chartArea;
+        const ctx = c.ctx;
+        emRanges.forEach(r => {
+          const startX = x.getPixelForValue(r.start);
+          const endX = x.getPixelForValue(r.end || Date.now());
+          ctx.save();
+          ctx.fillStyle = 'rgba(173,216,230,0.3)';
+          ctx.fillRect(startX, area.top, endX - startX, area.bottom - area.top);
+          ctx.restore();
+        });
+      }
+    };
+
+    // Initialize chart
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: { datasets: [{ data: [], fill: false, borderColor: 'green', tension: 0.1, segment: { borderColor: ctx => ctx.p1.parsed.y < 0 ? 'orange' : 'green' } }] },
+      options: { responsive: true, maintainAspectRatio: false, scales: { x: { type: 'time' }, y: { min: -90, max: 90 } }, plugins: { legend: { display: false } } },
+      plugins: [emuPlugin]
+    });
+
+    // Handlers
+    function handleOrientation(a) {
+      if (typeof a !== 'number') return;
+      const now = Date.now();
+      historyData.push({ x: now, y: a });
+      historyData = historyData.filter(pt => pt.x >= now - 600000);
+      chart.data.datasets[0].data = historyData;
+      chart.options.scales.x.min = now - 600000;
+      chart.options.scales.x.max = now;
+      chart.update('none');
+      angleDisplay.textContent = `${a.toFixed(1)}°`;
+      bikeIconSvg.style.transform = `skewY(${a}deg)`;
+      const pct = Math.min(Math.abs(a) / 90 * 50, 50);
+      bar.style.left = a >= 0 ? '50%' : `${50 - pct}%`;
+      bar.style.width = `${pct}%`;
+      bar.style.backgroundColor = a < 0 ? 'orange' : '#4caf50';
+    }
+    function handleSpeed(pos) {
+      const sp = pos.coords.speed;
+      let km;
+      if (typeof sp === 'number' && !isNaN(sp)) km = Math.round(sp * 3.6);
+      else if (prevGeo) {
+        const dt = (pos.timestamp - prevGeo.timestamp) / 1000;
+        const R = 6371000;
+        const dLat = (pos.coords.latitude - prevGeo.coords.latitude) * Math.PI/180;
+        const dLon = (pos.coords.longitude - prevGeo.coords.longitude) * Math.PI/180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(prevGeo.coords.latitude * Math.PI/180) * Math.cos(pos.coords.latitude * Math.PI/180) * Math.sin(dLon/2)**2;
+        const dist = 2*R*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        km = Math.round((dist/dt)*3.6);
+      } else km = 0;
+      prevGeo = { coords: pos.coords, timestamp: pos.timestamp };
+      speedValue.textContent = `${km} km/h`;
+      speedBar.style.width = `${Math.min(km/200*100,100)}%`;
+    }
+    function handleDevOrient(e) { handleOrientation(e.gamma); }
+    function handleMotion(e) { if (e.rotationRate && typeof e.rotationRate.gamma === 'number') handleOrientation(e.rotationRate.gamma); }
+
+    function startDetection() {
+      if (listening) return;
+      if (emulating) stopEmulation();
+      log('Starting detection');
+      window.removeEventListener('deviceorientation', handleDevOrient);
+      window.removeEventListener('devicemotion', handleMotion);
+      const enable = () => {
+        window.addEventListener('deviceorientation', handleDevOrient);
+        window.addEventListener('devicemotion', handleMotion);
+        listening = true;
+        sidebar.classList.remove('open');
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      };
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(res => { if (res === 'granted') enable(); });
+      } else enable();
+      if (!window.isSecureContext) {
+        log('Insecure context: Geolocation disabled');
+        return;
+      }
+      prevGeo = null;
+      geoWatchId = navigator.geolocation.watchPosition(
+        handleSpeed,
+        err => { log(`GPS error (${err.code}): ${err.message}`); },
+        { enableHighAccuracy: true, maximumAge: 1000 }
+      );
+    }
+
+    function stopDetection() {
+      if (!listening) return;
+      window.removeEventListener('deviceorientation', handleDevOrient);
+      window.removeEventListener('devicemotion', handleMotion);
+      listening = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      if (geoWatchId != null) navigator.geolocation.clearWatch(geoWatchId);
+    }
+
+    function startEmulation() {
+      if (emulating) return;
+      if (listening) stopDetection();
+      log('Starting emulation');
+      emulating = true;
+      emulateBtn.textContent = 'Stop Emulation';
+      sidebar.classList.remove('open');
+      emRanges.push({ start: Date.now(), end: null });
+      emuInterval = setInterval(() => {
+        const a = Math.random()*120 - 60;
+        handleOrientation(a);
+        handleSpeed({ coords:{ speed: undefined }, timestamp: Date.now(), coords: prevGeo ? prevGeo.coords : { latitude:0, longitude:0 } });
+      }, 1000);
+    }
+
+    function stopEmulation() {
+      if (!emulating) return;
+      clearInterval(emuInterval);
+      emulating = false;
+      emulateBtn.textContent = 'Emulation Mode';
+      emRanges[emRanges.length-1].end = Date.now();
+    }
+
+    function exportPDF() {
+      html2canvas(document.querySelector('#historyChart')).then(canvas => {
+        const img = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ orientation: 'landscape' });
+        const props = pdf.getImageProperties(img);
+        const pdfWidth = pdf.internal.pageSize.getWidth() - 20;
+        const pdfHeight = (props.height * pdfWidth) / props.width;
+        const now = new Date();
+        const fn = `BikerAgent_LeanHistory_${now.getFullYear()}${String(now.getDate()).padStart(2,'0')}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}.pdf`;
+        pdf.addImage(img, 'PNG', 10, 10, pdfWidth, pdfHeight);
+        pdf.save(fn);
+      });
+    }
+
+    // Controls binding
+    toggleSidebar.addEventListener('click', () => sidebar.classList.toggle('open'));
+    startBtn.addEventListener('click', startDetection);
+    stopBtn.addEventListener('click', stopDetection);
+    emulateBtn.addEventListener('click', () => emulating ? stopEmulation() : startEmulation());
+    exportBtn.addEventListener('click', exportPDF);
+    toggleLogBtn.addEventListener('click', () => {
+      const vis = logEl.classList.toggle('show');
+      toggleLogBtn.textContent = vis ? 'Hide Logs' : 'Show Logs';
+    });
+  </script>
+</body>
+</html>
